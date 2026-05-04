@@ -1,0 +1,48 @@
+import { NextRequest, NextResponse } from "next/server";
+
+const GEMMA_MODEL = "gemma-4-31b-it";
+const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMMA_MODEL}:generateContent`;
+
+export async function POST(req: NextRequest) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    return NextResponse.json({ error: "GEMINI_API_KEY is not set" }, { status: 500 });
+  }
+
+  try {
+    const { prompt, systemInstruction } = await req.json();
+
+    const body: any = {
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.2,
+        maxOutputTokens: 2048,
+      },
+    };
+
+    if (systemInstruction) {
+      body.system_instruction = {
+        parts: [{ text: systemInstruction }]
+      };
+    }
+
+    const response = await fetch(GEMINI_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": apiKey,
+      },
+      body: JSON.stringify(body),
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      return NextResponse.json({ error: data.error?.message || "Gemma API error" }, { status: response.status });
+    }
+
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    return NextResponse.json({ text, model: GEMMA_MODEL });
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}
