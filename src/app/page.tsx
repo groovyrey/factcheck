@@ -15,12 +15,36 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 
+const GoogleIcon = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" {...props}>
+    <path d="M12.545,10.239v3.821h5.445c-0.712,2.315-2.647,3.972-5.445,3.972c-3.332,0-6.033-2.701-6.033-6.032s2.701-6.032,6.033-6.032c1.498,0,2.866,0.549,3.921,1.453l2.814-2.814C17.503,2.988,15.139,2,12.545,2C7.021,2,2.543,6.477,2.543,12s4.478,10,10.002,10c8.396,0,10.249-7.85,9.426-11.748L12.545,10.239z" />
+  </svg>
+);
+
+const BingIcon = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" {...props}>
+    <path d="M13.2 2.5 5.5 8.1v13.4l8.5-4.4 7.5-3.3V2.5l-8.3 0z" />
+  </svg>
+);
+
+const BaiduIcon = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" {...props}>
+    <path d="M12.28 2C6.98 2 2.68 6.3 2.68 11.6c0 5.3 4.3 9.6 9.6 9.6 5.3 0 9.6-4.3 9.6-9.6C21.88 6.3 17.58 2 12.28 2zm3.3 12.8c-0.6 0.6-1.5 1.1-2.4 1.2-1.3 0.2-2.7-0.1-3.6-1.1-0.9-1-1.1-2.4-0.6-3.7 0.5-1.3 1.8-2.1 3.2-2 1.3 0.1 2.3 0.9 2.7 2.1 0.1 0.4 0.1 0.8 0 1.2-0.1 0.4-0.3 0.7-0.5 1-0.8 0.9-1.9 1.1-2.8 0.9-0.9-0.2-1.6-0.8-1.8-1.7-0.2-0.9 0.1-1.9 0.8-2.5 0.7-0.6 1.7-0.8 2.6-0.6 0.9 0.2 1.6 0.8 1.9 1.6 0.2 0.5 0.2 1 0.1 1.5l-0.3 0.5z" />
+  </svg>
+);
+
+const ScholarIcon = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" {...props}>
+    <path d="M12 3 1 9l11 6 9-4.91V17h2V9L12 3zM5.63 11.09 12 14.6l6.37-3.51L12 7.59l-6.37 3.5z" />
+  </svg>
+);
+
 const SEARCH_ENGINES = [
   { id: "langsearch", name: "Lang Search (Web)", icon: Globe },
-  { id: "google", name: "Google Search (SerpApi)", icon: Search },
-  { id: "google_scholar", name: "Google Scholar (SerpApi)", icon: Search },
-  { id: "bing", name: "Bing Search (SerpApi)", icon: Search },
-  { id: "baidu", name: "Baidu Search (SerpApi)", icon: Search },
+  { id: "google", name: "Google Search (SerpApi)", icon: GoogleIcon },
+  { id: "google_scholar", name: "Google Scholar (SerpApi)", icon: ScholarIcon },
+  { id: "bing", name: "Bing Search (SerpApi)", icon: BingIcon },
+  { id: "baidu", name: "Baidu Search (SerpApi)", icon: BaiduIcon },
 ];
 
 export default function Home() {
@@ -90,8 +114,8 @@ export default function Home() {
       <main className="container mx-auto max-w-6xl px-4 py-8 space-y-8">
         <section className="space-y-4">
           <div className="flex flex-col gap-1">
-            <h1 className="text-2xl font-bold tracking-tight">Search and Summarize</h1>
-            <p className="text-muted-foreground">Pick a search engine and get an AI summary of the results.</p>
+            <h1 className="text-2xl font-bold tracking-tight">Search</h1>
+            <p className="text-muted-foreground">Find what you need.</p>
           </div>
 
           <Card>
@@ -100,7 +124,7 @@ export default function Home() {
                 <Input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="What do you want to search for?"
+                  placeholder="Enter search term..."
                   onKeyDown={(e) => e.key === "Enter" && handleSearch()}
                   className="bg-muted/30"
                 />
@@ -108,7 +132,21 @@ export default function Home() {
               <div className="md:w-64">
                 <Select value={engine} onValueChange={setEngine}>
                   <SelectTrigger className="bg-muted/30">
-                    <SelectValue placeholder="Select Engine" />
+                    <SelectValue placeholder="Engine">
+                      <div className="flex items-center gap-2 overflow-hidden">
+                        {(() => {
+                          const selectedEngine = SEARCH_ENGINES.find((e) => e.id === engine);
+                          const Icon = selectedEngine?.icon || Search;
+                          return <Icon className="size-3.5 shrink-0" />;
+                        })()}
+                        <span>
+                          {(() => {
+                            const selectedEngine = SEARCH_ENGINES.find((e) => e.id === engine);
+                            return selectedEngine?.name || "Engine";
+                          })()}
+                        </span>
+                      </div>
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {SEARCH_ENGINES.map((eng) => (
@@ -123,7 +161,7 @@ export default function Home() {
                 </Select>
               </div>
               <Button onClick={handleSearch} disabled={loading} size="lg">
-                {loading ? <Loader2 className="animate-spin" /> : "Search"}
+                {loading ? <Loader2 className="animate-spin" /> : "Go"}
               </Button>
             </CardContent>
           </Card>
@@ -132,7 +170,7 @@ export default function Home() {
         {loading && (
           <div className="flex flex-col items-center justify-center py-24 space-y-4">
             <Loader2 className="animate-spin size-8 text-primary/40" />
-            <p className="text-sm text-muted-foreground font-medium">Searching {engine.replace("_", " ")}...</p>
+            <p className="text-sm text-muted-foreground font-medium">Looking...</p>
           </div>
         )}
 
@@ -142,8 +180,8 @@ export default function Home() {
               <Card className="overflow-hidden">
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
                   <div className="space-y-1">
-                    <CardTitle className="text-xl">AI Summary</CardTitle>
-                    <CardDescription>Synthesized intelligence report</CardDescription>
+                    <CardTitle className="text-xl">Results</CardTitle>
+                    <CardDescription>AI summary of findings</CardDescription>
                   </div>
                   <Button 
                     onClick={handleSummarize} 
