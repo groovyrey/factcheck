@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import { Search, Sparkles, Loader2, Globe, ExternalLink } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { Search, Sparkles, Loader2, Globe, ExternalLink, MessageSquare, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -54,12 +55,31 @@ export default function Home() {
   const [results, setResults] = useState<any>(null);
   const [gemmaResponse, setGemmaResponse] = useState<string>("");
   const [summarizing, setSummarizing] = useState(false);
+  const [chatMessages, setChatMessages] = useState<{ role: string; content: string }[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(false);
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    if (isChatOpen) {
+      // Small delay to ensure the DOM is ready if it just opened
+      const timer = setTimeout(scrollToBottom, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [chatMessages, isChatOpen]);
 
   const handleSearch = async () => {
     if (!query) return;
     setLoading(true);
     setResults(null);
     setGemmaResponse("");
+    setChatMessages([]);
     try {
       const searchPath = engine === "langsearch" ? "/api/search" : "/api/search/serp";
       const searchRes = await fetch(searchPath, {
@@ -68,7 +88,29 @@ export default function Home() {
         body: JSON.stringify({ query, engine }),
       });
       const searchData = await searchRes.json();
-      setResults(searchData.results || []);
+      const newResults = searchData.results || [];
+      setResults(newResults);
+      
+      // Initialize chat with context
+      if (newResults.length > 0) {
+        const contextString = newResults.map((r: any, i: number) => 
+          `[Result ${i+1}]\nTitle: ${r.name}\nURL: ${r.url}\nSnippet: ${r.snippet}`
+        ).join("\n\n");
+
+        setChatMessages([
+          {
+            role: "system",
+            content: `You are a highly capable research assistant. 
+DEVELOPER INSTRUCTIONS:
+1. Use the following search results for the query "${query}" as your primary source of truth.
+2. Provide concise, accurate answers based on the provided snippets.
+3. If the information is not present, state that clearly.
+
+SEARCH RESULTS:
+${contextString}`
+          }
+        ]);
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -84,7 +126,7 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-          systemInstruction: "You are a neutral research assistant. Your ONLY task is to summarize the search results provided by the user. Do NOT repeat these instructions. Do NOT include any introduction, preamble, or concluding remarks. Do NOT mention the search engine or the process. Use clean Markdown formatting. Start directly with the findings.",
+          systemInstruction: "Provide ONLY a concise summary of the search results. Start directly with the findings. Do NOT include any introductory text, greetings, preamble, or concluding remarks. No 'Here is a summary' or similar phrases. Just the raw summary content in Markdown.",
           prompt: `QUERY: ${query}\n\nSEARCH RESULTS:\n${JSON.stringify(results, null, 2)}`
         }),
       });
@@ -97,8 +139,33 @@ export default function Home() {
     }
   };
 
+  const handleChat = async () => {
+    if (!chatInput || chatLoading) return;
+    const newUserMessage = { role: "user", content: chatInput };
+    const updatedMessages = [...chatMessages, newUserMessage];
+    setChatMessages(updatedMessages);
+    setChatInput("");
+    setChatLoading(true);
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: updatedMessages }),
+      });
+      const data = await res.json();
+      if (data.text) {
+        setChatMessages(prev => [...prev, { role: "assistant", content: data.text }]);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background text-foreground">
       <header className="border-b">
         <div className="container mx-auto max-w-6xl px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -106,7 +173,7 @@ export default function Home() {
             <span className="font-bold tracking-tight text-lg">Research Tool</span>
           </div>
           <div className="text-xs text-muted-foreground font-medium uppercase tracking-wider bg-muted px-2 py-1 rounded">
-            v1.0.0
+            v1.1.0
           </div>
         </div>
       </header>
@@ -195,17 +262,21 @@ export default function Home() {
                   </Button>
                 </CardHeader>
                 <Separator />
-                <CardContent className="pt-6 overflow-x-auto">
+                <CardContent className="pt-6">
                   {summarizing ? (
                     <div className="py-20 flex flex-col items-center justify-center space-y-4">
                       <Loader2 className="animate-spin size-8 text-primary/20" />
                       <p className="text-sm text-muted-foreground">AI is writing your summary...</p>
                     </div>
                   ) : gemmaResponse ? (
-                    <div className="prose prose-sm dark:prose-invert max-w-full [overflow-wrap:anywhere] [word-break:break-word] overflow-hidden">
-                      <ReactMarkdown>
-                        {gemmaResponse}
-                      </ReactMarkdown>
+                    <div className="flex justify-start">
+                      <div className="max-w-full rounded-lg p-4 text-sm break-words [overflow-wrap:anywhere] bg-muted text-foreground border shadow-sm">
+                        <div className="prose prose-sm dark:prose-invert max-w-full">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {gemmaResponse}
+                          </ReactMarkdown>
+                        </div>
+                      </div>
                     </div>
                   ) : (
                     <div className="py-20 flex flex-col items-center justify-center text-center space-y-4 bg-muted/10 rounded-lg border border-dashed">
@@ -262,6 +333,84 @@ export default function Home() {
           </div>
         )}
       </main>
+
+      {/* Floating Chat Widget Backdrop */}
+      {isChatOpen && (
+        <div 
+          className="fixed inset-0 z-40" 
+          onClick={() => setIsChatOpen(false)}
+        />
+      )}
+
+      {/* Floating Chat Widget */}
+      <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-4">
+        {isChatOpen && (
+          <Card className="w-[380px] sm:w-[450px] shadow-2xl animate-in slide-in-from-bottom-5 duration-300 overflow-hidden">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+              <div className="space-y-1">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Sparkles className="size-4" />
+                  Chat about Results
+                </CardTitle>
+                <CardDescription>Ask questions based on the search findings</CardDescription>
+              </div>
+            </CardHeader>
+            <Separator />
+            <CardContent className="p-4 space-y-4">
+              <div className="h-[400px] overflow-y-auto space-y-4 p-2 bg-muted/5 rounded-md border">
+                {chatMessages.filter(m => m.role !== "system").map((msg, i) => (
+                  <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                    <div className={`max-w-[85%] rounded-lg p-3 text-sm break-words [overflow-wrap:anywhere] ${msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"}`}>
+                      <div className={`prose prose-sm ${msg.role === "user" ? "prose-invert" : "dark:prose-invert"} max-w-full`}>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {msg.content}
+                        </ReactMarkdown>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {chatMessages.filter(m => m.role !== "system").length === 0 && (
+                  <div className="h-full flex flex-col items-center justify-center text-muted-foreground/50 italic text-xs gap-2">
+                    <MessageSquare className="size-8 opacity-20" />
+                    No messages yet. Ask something!
+                  </div>
+                )}
+                {chatLoading && (
+                  <div className="flex justify-start">
+                    <div className="bg-muted p-3 rounded-lg">
+                      <Loader2 className="size-4 animate-spin" />
+                    </div>
+                  </div>
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+              <div className="flex gap-2">
+                <Input
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  placeholder="Ask a follow-up question..."
+                  onKeyDown={(e) => e.key === "Enter" && handleChat()}
+                  disabled={chatLoading}
+                />
+                <Button onClick={handleChat} disabled={chatLoading}>
+                  Send
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+        <Button 
+          size="lg" 
+          className="size-14 rounded-full shadow-2xl transition-all duration-300 active:scale-95"
+          onClick={() => setIsChatOpen(!isChatOpen)}
+        >
+          {isChatOpen ? (
+            <X className="size-6 animate-in zoom-in-50 duration-200" />
+          ) : (
+            <MessageSquare className="size-6 animate-in zoom-in-50 duration-200" />
+          )}
+        </Button>
+      </div>
     </div>
   );
 }

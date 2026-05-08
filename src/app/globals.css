@@ -2,6 +2,8 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+@plugin "@tailwindcss/typography";
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -126,5 +128,15 @@
   }
   html {
     @apply font-sans;
+  }
+
+  .prose table {
+    @apply border-collapse table-auto w-full my-4;
+  }
+  .prose th {
+    @apply border border-border px-4 py-2 bg-muted/50 text-left font-bold;
+  }
+  .prose td {
+    @apply border border-border px-4 py-2;
   }
 }

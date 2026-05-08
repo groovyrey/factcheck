@@ -82,7 +82,25 @@ export async function POST(request: Request) {
     }),
   });
 
-  const payload = (await response.json()) as LangSearchResponse;
+  let payload: LangSearchResponse;
+  const contentType = response.headers.get("content-type");
+  
+  if (contentType && contentType.includes("application/json")) {
+    try {
+      payload = (await response.json()) as LangSearchResponse;
+    } catch (e) {
+      return Response.json(
+        { error: `Failed to parse LangSearch response as JSON. Status: ${response.status}` },
+        { status: 502 },
+      );
+    }
+  } else {
+    const text = await response.text();
+    return Response.json(
+      { error: `LangSearch returned non-JSON response. Status: ${response.status}`, details: text.slice(0, 200) },
+      { status: 502 },
+    );
+  }
 
   if (!response.ok) {
     return Response.json(
