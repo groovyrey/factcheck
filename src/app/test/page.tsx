@@ -102,7 +102,11 @@ export default function TestPage() {
                     ? "bg-primary text-primary-foreground rounded-tr-none" 
                     : "bg-card text-card-foreground border rounded-tl-none"
                 }`}>
-                  <div className={`prose prose-sm ${msg.role === "user" ? "prose-invert" : "dark:prose-invert"} max-w-full overflow-x-auto`}>
+                  <div className={`prose prose-sm max-w-full overflow-x-auto ${
+                    msg.role === "user" 
+                      ? "prose-invert dark:prose-neutral" 
+                      : "dark:prose-invert"
+                  }`}>
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
                       {typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content)}
                     </ReactMarkdown>

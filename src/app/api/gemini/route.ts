@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { logger } from "@/lib/logger";
 import { rateLimit } from "@/lib/rate-limit";
 
-const GEMINI_MODEL = "gemini-2.5-flash";
+const GEMINI_MODEL = "gemma-4-26b-a4b-it";
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 const SERP_ENDPOINT = "https://serpapi.com/search";
 
@@ -10,11 +10,10 @@ async function googleSearch(query: string) {
   const apiKey = process.env.SERP_API_KEY;
   if (!apiKey) return "Error: SERP_API_KEY is not set";
 
-  // Rate limit: 5 requests per 10 minutes to save quota
   const limiter = await rateLimit("google_search", 5, 10 * 60 * 1000);
   if (!limiter.success) {
     const minutes = Math.ceil((limiter.resetIn || 0) / 60000);
-    return `Error: Google Search rate limit exceeded. Please wait ${minutes} minutes. This is a safety measure to protect API quota.`;
+    return `Error: Google Search rate limit exceeded. Please wait ${minutes} minutes.`;
   }
 
   try {
@@ -37,44 +36,28 @@ async function googleSearch(query: string) {
 async function fetchUrlContent(url: string) {
   const fetchWithHeaders = async (targetUrl: string, useJina = false) => {
     const finalUrl = useJina ? `https://r.jina.ai/${targetUrl}` : targetUrl;
-    const response = await fetch(finalUrl, {
+    return await fetch(finalUrl, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Cache-Control": "no-cache",
-        "Upgrade-Insecure-Requests": "1"
       }
     });
-    return response;
   };
 
   try {
-    logger.info("fetchUrlContent: Attempting direct fetch", { url });
     let response = await fetchWithHeaders(url);
-    
-    // If forbidden or blocked, try via Jina Reader
     if (response.status === 403 || response.status === 429 || response.status === 401) {
-      logger.warn(`fetchUrlContent: Direct fetch returned ${response.status}. Retrying via Jina...`, { url });
       response = await fetchWithHeaders(url, true);
     }
-
-    if (!response.ok) {
-      return `Error fetching URL: ${response.status} ${response.statusText}`;
-    }
-
+    if (!response.ok) return `Error fetching URL: ${response.status} ${response.statusText}`;
     const text = await response.text();
-    // Clean up content
     const cleanedText = text
       .replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gmi, "")
       .replace(/<style\b[^>]*>([\s\S]*?)<\/style>/gmi, "")
       .replace(/<[^>]+>/g, " ")
       .replace(/\s+/g, " ")
       .trim();
-    
     return cleanedText.slice(0, 20000); 
   } catch (error: any) {
-    logger.error("fetchUrlContent: Unexpected error", { url, error: error.message });
     return `Error fetching URL: ${error.message}`;
   }
 }
@@ -84,7 +67,7 @@ const geminiTools = [
     function_declarations: [
       {
         name: "fetch_url",
-        description: "Fetches the content of a specific URL and returns the text content. Use this to get more details from a specific search result or website.",
+        description: "Fetches the content of a specific URL and returns the text content.",
         parameters: {
           type: "OBJECT",
           properties: {
@@ -95,7 +78,7 @@ const geminiTools = [
       },
       {
         name: "google_search",
-        description: "Performs a Google search to find new information or websites. Use this if the initial search results are not sufficient or if you need to look up something new.",
+        description: "Performs a Google search to find new information.",
         parameters: {
           type: "OBJECT",
           properties: {
@@ -116,14 +99,29 @@ export async function POST(req: NextRequest) {
     const { messages } = await req.json();
     logger.info("POST /api/gemini: Request received", { messageCount: messages?.length });
 
-    // Handle system message specifically for Gemini
     const systemMessage = messages.find((m: any) => m.role === "system");
     const userMessages = messages.filter((m: any) => m.role !== "system");
 
-    let contents = userMessages.map((m: any) => ({
-      role: m.role === "assistant" ? "model" : "user",
-      parts: [{ text: m.content }]
-    }));
+    let contents = userMessages.map((m: any) => {
+      const role = m.role === "assistant" ? "model" : "user";
+      if (m.parts && Array.isArray(m.parts)) {
+        return {
+          role,
+          parts: m.parts.map((p: any) => {
+            const part: any = {};
+            if (p.text) part.text = p.text;
+            if (p.thought) part.thought = p.thought;
+            if (p.functionCall) part.functionCall = p.functionCall;
+            if (p.functionResponse) part.functionResponse = p.functionResponse;
+            return part;
+          })
+        };
+      }
+      return {
+        role,
+        parts: [{ text: m.content || " " }]
+      };
+    });
 
     let iterations = 0;
     const maxIterations = 5;
@@ -132,22 +130,31 @@ export async function POST(req: NextRequest) {
       const body: any = {
         contents,
         tools: geminiTools,
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 4096,
+        }
       };
 
       if (systemMessage) {
         body.system_instruction = { parts: [{ text: systemMessage.content }] };
       }
 
-      const response = await fetch(`${GEMINI_ENDPOINT}?key=${apiKey}`, {
+      logger.info(`POST /api/gemini: Calling ${GEMINI_MODEL}`, { iterations });
+
+      const response = await fetch(GEMINI_ENDPOINT, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey
+        },
         body: JSON.stringify(body),
       });
 
       const data = await response.json();
       if (!response.ok) {
-        logger.error("POST /api/gemini: Gemini API error", { status: response.status, error: data.error });
-        return NextResponse.json({ error: data.error?.message || "Gemini API error" }, { status: response.status });
+        logger.error("POST /api/gemini: API error", { status: response.status, error: data.error });
+        return NextResponse.json({ error: data.error?.message || "Internal API Error" }, { status: response.status });
       }
 
       const candidate = data.candidates?.[0];
@@ -155,42 +162,24 @@ export async function POST(req: NextRequest) {
       const functionCalls = messageParts.filter((p: any) => p.functionCall);
 
       if (functionCalls.length > 0) {
-        logger.info("POST /api/gemini: Gemini requested tool calls", { count: functionCalls.length });
-        
-        // Add the model's call to history
         contents.push(candidate.content);
-
         const responseParts = [];
         for (const part of functionCalls) {
           const { name, args } = part.functionCall;
           let result;
-          if (name === "fetch_url") {
-            result = await fetchUrlContent(args.url);
-          } else if (name === "google_search") {
-            result = await googleSearch(args.query);
-          }
+          if (name === "fetch_url") result = await fetchUrlContent(args.url);
+          else if (name === "google_search") result = await googleSearch(args.query);
           responseParts.push({
-            functionResponse: {
-              name,
-              response: { content: result }
-            }
+            functionResponse: { name, response: { content: result } }
           });
         }
-
-        // Add tool responses to history
-        contents.push({
-          role: "user", // Gemini requires tool responses to be in a 'user' role content block or specifically formatted
-          parts: responseParts
-        });
-
+        contents.push({ role: "user", parts: responseParts });
         iterations++;
       } else {
-        const text = messageParts.map((p: any) => p.text).join("") || "";
-        logger.info("POST /api/gemini: Response completed", { textLength: text.length });
-        return NextResponse.json({ text, model: GEMINI_MODEL });
+        const text = messageParts.filter((p: any) => !p.thought).map((p: any) => p.text).join("") || "";
+        return NextResponse.json({ text, parts: messageParts, model: GEMINI_MODEL });
       }
     }
-
     return NextResponse.json({ error: "Too many iterations" }, { status: 500 });
   } catch (error: any) {
     logger.error("POST /api/gemini: Unexpected error", error);
