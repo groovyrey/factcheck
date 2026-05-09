@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Search, Sparkles, Loader2, Globe, ExternalLink, MessageSquare, X } from "lucide-react";
+import { Search, Sparkles, Loader2, Globe, ExternalLink, MessageSquare, X, RotateCcw } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
@@ -104,7 +104,10 @@ export default function Home() {
 DEVELOPER INSTRUCTIONS:
 1. Use the following search results for the query "${query}" as your primary source of truth.
 2. Provide concise, accurate answers based on the provided snippets.
-3. If the information is not present, state that clearly.
+3. If you need more information from a specific search result to answer a question accurately, use the "fetch_url" tool to retrieve the full page content.
+4. If the initial search results are not sufficient or you need to find more information, use the "google_search" tool to perform a new search.
+5. STRICT DISCLOSURE: If you provide any information that is NOT found in the provided search results or fetched content (i.e., information from your own training knowledge), you MUST explicitly inform the user.
+6. If the information is not present even after fetching or searching, state that clearly.
 
 SEARCH RESULTS:
 ${contextString}`
@@ -151,7 +154,9 @@ ${contextString}`
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: updatedMessages }),
+        body: JSON.stringify({ 
+          messages: updatedMessages
+        }),
       });
       const data = await res.json();
       if (data.text) {
@@ -161,6 +166,16 @@ ${contextString}`
       console.error(err);
     } finally {
       setChatLoading(false);
+    }
+  };
+
+  const handleRestartChat = () => {
+    // Keep system message if results exist
+    if (results && results.length > 0) {
+      const systemMessage = chatMessages.find(m => m.role === "system");
+      setChatMessages(systemMessage ? [systemMessage] : []);
+    } else {
+      setChatMessages([]);
     }
   };
 
@@ -334,6 +349,14 @@ ${contextString}`
         )}
       </main>
 
+      <footer className="border-t py-6 mt-12">
+        <div className="container mx-auto max-w-6xl px-4 flex justify-center">
+          <p className="text-xs text-muted-foreground font-medium uppercase tracking-widest">
+            Developed and Maintained by: <span className="text-foreground font-bold">Rey</span>
+          </p>
+        </div>
+      </footer>
+
       {/* Floating Chat Widget Backdrop */}
       {isChatOpen && (
         <div 
@@ -353,6 +376,11 @@ ${contextString}`
                   Chat about Results
                 </CardTitle>
                 <CardDescription>Ask questions based on the search findings</CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" size="icon" onClick={handleRestartChat} title="Restart Conversation">
+                  <RotateCcw className="size-4" />
+                </Button>
               </div>
             </CardHeader>
             <Separator />
