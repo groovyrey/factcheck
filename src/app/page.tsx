@@ -100,16 +100,20 @@ export default function Home() {
         setChatMessages([
           {
             role: "system",
-            content: `You are a highly capable research assistant. 
-DEVELOPER INSTRUCTIONS:
-1. Use the following search results for the query "${query}" as your primary source of truth.
-2. Provide concise, accurate answers based on the provided snippets.
-3. If you need more information from a specific search result to answer a question accurately, use the "fetch_url" tool to retrieve the full page content.
-4. If the initial search results are not sufficient or you need to find more information, use the "google_search" tool to perform a new search.
-5. STRICT DISCLOSURE: If you provide any information that is NOT found in the provided search results or fetched content (i.e., information from your own training knowledge), you MUST explicitly inform the user.
-6. If the information is not present even after fetching or searching, state that clearly.
+            content: `You are SourceCheck, a world-class research and fact-checking assistant. Your goal is to provide comprehensive, verified, and well-structured answers.
 
-SEARCH RESULTS:
+CORE PROTOCOLS:
+1. **Primary Source of Truth:** Use the provided search results for "${query}" as your starting point. Always prioritize information found in these results or through the "fetch_url" tool.
+2. **Detailed Analysis:** Don't just provide a summary; analyze the content. Look for consensus among different sources and highlight any contradictions or conflicting information.
+3. **Structured Formatting:** Use Markdown to make your answers easy to read. Utilize headings (##), bullet points, and bold text for key terms.
+4. **Explicit Citations:** Every claim you make should ideally be linked to a source. Use format like "[Source: Website Name]" or "[Source 1]".
+5. **Tool Usage Strategy:**
+   - Use "fetch_url" if a snippet is too short or if you suspect critical details are missing.
+   - Use "google_search" if the current results are insufficient to answer the user's question or if a new angle of research is required.
+6. **Strict Disclosure:** If you must use your internal training knowledge to provide context or fill gaps, you MUST explicitly state: "Note: The following information is based on my general training data and was not found in the live search results."
+7. **Proactive Assistance:** At the end of your response, suggest 2-3 logical follow-up questions or areas for deeper research based on what you found.
+
+SEARCH RESULTS CONTEXT:
 ${contextString}`
           }
         ]);
@@ -151,7 +155,7 @@ ${contextString}`
     setChatLoading(true);
 
     try {
-      const res = await fetch("/api/chat", {
+      const res = await fetch("/api/gemini", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
@@ -180,20 +184,8 @@ ${contextString}`
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <header className="border-b">
-        <div className="container mx-auto max-w-6xl px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Sparkles className="size-5 text-primary" />
-            <span className="font-bold tracking-tight text-lg">Research Tool</span>
-          </div>
-          <div className="text-xs text-muted-foreground font-medium uppercase tracking-wider bg-muted px-2 py-1 rounded">
-            v1.1.0
-          </div>
-        </div>
-      </header>
-
-      <main className="container mx-auto max-w-6xl px-4 py-8 space-y-8">
+    <div className="min-h-screen bg-background text-foreground flex flex-col">
+      <main className="container mx-auto max-w-6xl px-4 py-8 space-y-8 flex-1">
         <section className="space-y-4">
           <div className="flex flex-col gap-1">
             <h1 className="text-2xl font-bold tracking-tight">Search</h1>
@@ -201,50 +193,52 @@ ${contextString}`
           </div>
 
           <Card>
-            <CardContent className="p-4 flex flex-col md:flex-row gap-3">
-              <div className="flex-1">
+            <CardContent className="p-3 sm:p-4 flex flex-col md:flex-row gap-3">
+              <div className="flex-1 min-w-0">
                 <Input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Enter search term..."
                   onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-                  className="bg-muted/30"
+                  className="bg-muted/30 h-10 sm:h-12"
                 />
               </div>
-              <div className="md:w-64">
-                <Select value={engine} onValueChange={setEngine}>
-                  <SelectTrigger className="bg-muted/30">
-                    <SelectValue placeholder="Engine">
-                      <div className="flex items-center gap-2 overflow-hidden">
-                        {(() => {
-                          const selectedEngine = SEARCH_ENGINES.find((e) => e.id === engine);
-                          const Icon = selectedEngine?.icon || Search;
-                          return <Icon className="size-3.5 shrink-0" />;
-                        })()}
-                        <span>
+              <div className="flex gap-2 w-full md:w-auto">
+                <div className="flex-1 md:w-64">
+                  <Select value={engine} onValueChange={setEngine}>
+                    <SelectTrigger className="bg-muted/30 h-10 sm:h-12">
+                      <SelectValue placeholder="Engine">
+                        <div className="flex items-center gap-2 overflow-hidden">
                           {(() => {
                             const selectedEngine = SEARCH_ENGINES.find((e) => e.id === engine);
-                            return selectedEngine?.name || "Engine";
+                            const Icon = selectedEngine?.icon || Search;
+                            return <Icon className="size-3.5 shrink-0" />;
                           })()}
-                        </span>
-                      </div>
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {SEARCH_ENGINES.map((eng) => (
-                      <SelectItem key={eng.id} value={eng.id}>
-                        <div className="flex items-center gap-2">
-                          <eng.icon className="size-3.5" />
-                          <span>{eng.name}</span>
+                          <span className="truncate">
+                            {(() => {
+                              const selectedEngine = SEARCH_ENGINES.find((e) => e.id === engine);
+                              return selectedEngine?.name || "Engine";
+                            })()}
+                          </span>
                         </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {SEARCH_ENGINES.map((eng) => (
+                        <SelectItem key={eng.id} value={eng.id}>
+                          <div className="flex items-center gap-2">
+                            <eng.icon className="size-3.5" />
+                            <span>{eng.name}</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button onClick={handleSearch} disabled={loading} size="lg" className="h-10 sm:h-12 px-6">
+                  {loading ? <Loader2 className="animate-spin" /> : "Go"}
+                </Button>
               </div>
-              <Button onClick={handleSearch} disabled={loading} size="lg">
-                {loading ? <Loader2 className="animate-spin" /> : "Go"}
-              </Button>
             </CardContent>
           </Card>
         </section>
@@ -366,16 +360,16 @@ ${contextString}`
       )}
 
       {/* Floating Chat Widget */}
-      <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-4">
+      <div className="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 z-50 flex flex-col items-end gap-4 max-w-[calc(100vw-2rem)]">
         {isChatOpen && (
-          <Card className="w-[380px] sm:w-[450px] shadow-2xl animate-in slide-in-from-bottom-5 duration-300 overflow-hidden">
+          <Card className="w-full sm:w-[450px] shadow-2xl animate-in slide-in-from-bottom-5 duration-300 overflow-hidden flex flex-col max-h-[80vh] sm:max-h-[600px]">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
               <div className="space-y-1">
-                <CardTitle className="text-lg flex items-center gap-2">
+                <CardTitle className="text-base sm:text-lg flex items-center gap-2">
                   <Sparkles className="size-4" />
                   Chat about Results
                 </CardTitle>
-                <CardDescription>Ask questions based on the search findings</CardDescription>
+                <CardDescription className="text-xs sm:text-sm">Ask questions based on the search findings</CardDescription>
               </div>
               <div className="flex items-center gap-2">
                 <Button variant="ghost" size="icon" onClick={handleRestartChat} title="Restart Conversation">
@@ -384,12 +378,12 @@ ${contextString}`
               </div>
             </CardHeader>
             <Separator />
-            <CardContent className="p-4 space-y-4">
-              <div className="h-[400px] overflow-y-auto space-y-4 p-2 bg-muted/5 rounded-md border">
+            <CardContent className="p-3 sm:p-4 space-y-4 flex-1 overflow-hidden flex flex-col">
+              <div className="flex-1 overflow-y-auto space-y-4 p-2 bg-muted/5 rounded-md border min-h-0">
                 {chatMessages.filter(m => m.role !== "system").map((msg, i) => (
                   <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                    <div className={`max-w-[85%] rounded-lg p-3 text-sm break-words [overflow-wrap:anywhere] ${msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"}`}>
-                      <div className={`prose prose-sm ${msg.role === "user" ? "prose-invert" : "dark:prose-invert"} max-w-full`}>
+                    <div className={`max-w-[90%] sm:max-w-[85%] rounded-lg p-3 text-sm break-words [overflow-wrap:anywhere] ${msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"}`}>
+                      <div className={`prose prose-sm ${msg.role === "user" ? "prose-invert" : "dark:prose-invert"} max-w-full overflow-x-auto`}>
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>
                           {msg.content}
                         </ReactMarkdown>
@@ -398,7 +392,7 @@ ${contextString}`
                   </div>
                 ))}
                 {chatMessages.filter(m => m.role !== "system").length === 0 && (
-                  <div className="h-full flex flex-col items-center justify-center text-muted-foreground/50 italic text-xs gap-2">
+                  <div className="h-full min-h-[200px] flex flex-col items-center justify-center text-muted-foreground/50 italic text-xs gap-2">
                     <MessageSquare className="size-8 opacity-20" />
                     No messages yet. Ask something!
                   </div>
@@ -416,11 +410,12 @@ ${contextString}`
                 <Input
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
-                  placeholder="Ask a follow-up question..."
+                  placeholder="Ask a question..."
                   onKeyDown={(e) => e.key === "Enter" && handleChat()}
                   disabled={chatLoading}
+                  className="h-9 text-sm"
                 />
-                <Button onClick={handleChat} disabled={chatLoading}>
+                <Button onClick={handleChat} disabled={chatLoading} size="sm">
                   Send
                 </Button>
               </div>
@@ -429,13 +424,13 @@ ${contextString}`
         )}
         <Button 
           size="lg" 
-          className="size-14 rounded-full shadow-2xl transition-all duration-300 active:scale-95"
+          className="size-12 sm:size-14 rounded-full shadow-2xl transition-all duration-300 active:scale-95"
           onClick={() => setIsChatOpen(!isChatOpen)}
         >
           {isChatOpen ? (
-            <X className="size-6 animate-in zoom-in-50 duration-200" />
+            <X className="size-5 sm:size-6 animate-in zoom-in-50 duration-200" />
           ) : (
-            <MessageSquare className="size-6 animate-in zoom-in-50 duration-200" />
+            <MessageSquare className="size-5 sm:size-6 animate-in zoom-in-50 duration-200" />
           )}
         </Button>
       </div>

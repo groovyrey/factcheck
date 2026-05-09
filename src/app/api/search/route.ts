@@ -1,3 +1,5 @@
+import { logger } from "@/lib/logger";
+
 type LangSearchResponse = {
   code?: number;
   msg?: string | null;
@@ -47,6 +49,7 @@ export async function POST(request: Request) {
   const apiKey = process.env.LANGSEARCH_API_KEY;
 
   if (!apiKey) {
+    logger.error("POST /api/search: LANGSEARCH_API_KEY is not configured.");
     return Response.json(
       { error: "LANGSEARCH_API_KEY is not configured." },
       { status: 500 },
@@ -57,7 +60,9 @@ export async function POST(request: Request) {
 
   try {
     body = (await request.json()) as SearchRequest;
-  } catch {
+    logger.info("POST /api/search: Request received", { query: body.query, count: body.count });
+  } catch (e) {
+    logger.error("POST /api/search: Failed to parse request body", e);
     return Response.json({ error: "Request body must be JSON." }, { status: 400 });
   }
 
@@ -65,9 +70,11 @@ export async function POST(request: Request) {
   const count = typeof body.count === "number" ? body.count : 5;
 
   if (!query) {
+    logger.warn("POST /api/search: Missing query");
     return Response.json({ error: "Search query is required." }, { status: 400 });
   }
 
+  logger.info("POST /api/search: Calling LangSearch API", { query, count });
   const response = await fetch("https://api.langsearch.com/v1/web-search", {
     method: "POST",
     headers: {
@@ -89,6 +96,7 @@ export async function POST(request: Request) {
     try {
       payload = (await response.json()) as LangSearchResponse;
     } catch (e) {
+      logger.error("POST /api/search: Failed to parse LangSearch JSON", { status: response.status, error: e });
       return Response.json(
         { error: `Failed to parse LangSearch response as JSON. Status: ${response.status}` },
         { status: 502 },
@@ -96,6 +104,7 @@ export async function POST(request: Request) {
     }
   } else {
     const text = await response.text();
+    logger.error("POST /api/search: LangSearch returned non-JSON response", { status: response.status, bodyPreview: text.slice(0, 200) });
     return Response.json(
       { error: `LangSearch returned non-JSON response. Status: ${response.status}`, details: text.slice(0, 200) },
       { status: 502 },
@@ -103,6 +112,7 @@ export async function POST(request: Request) {
   }
 
   if (!response.ok) {
+    logger.error("POST /api/search: LangSearch API error", { status: response.status, message: payload.msg });
     return Response.json(
       {
         error:
@@ -114,8 +124,11 @@ export async function POST(request: Request) {
   }
 
   const results = payload.data?.webPages?.value ?? [];
-  const images = payload.data?.images?.value ?? [];
-  const videos = payload.data?.videos?.value ?? [];
+  logger.info("POST /api/search: Results obtained", { 
+    resultsCount: results.length,
+    imagesCount: payload.data?.images?.value?.length ?? 0,
+    videosCount: payload.data?.videos?.value?.length ?? 0
+  });
 
   return Response.json({
     query: payload.data?.queryContext?.originalQuery ?? query,
@@ -130,13 +143,13 @@ export async function POST(request: Request) {
       datePublished: result.datePublished ?? "",
       dateLastCrawled: result.dateLastCrawled ?? "",
     })),
-    images: images.map((img) => ({
+    images: (payload.data?.images?.value ?? []).map((img) => ({
       name: img.name ?? "",
       thumbnailUrl: img.thumbnailUrl ?? "",
       contentUrl: img.contentUrl ?? "",
       hostPageUrl: img.hostPageUrl ?? "",
     })),
-    videos: videos.map((vid) => ({
+    videos: (payload.data?.videos?.value ?? []).map((vid) => ({
       name: vid.name ?? "",
       thumbnailUrl: vid.thumbnailUrl ?? "",
       contentUrl: vid.contentUrl ?? "",
