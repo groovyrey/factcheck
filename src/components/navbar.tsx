@@ -4,34 +4,28 @@ import Link from "next/link";
 import { Sparkles, FlaskConical, Search, Moon, Sun } from "lucide-react";
 import { buttonVariants, Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 
 export function Navbar() {
-  const [theme, setTheme] = useState<"light" | "dark">("light");
-
   useEffect(() => {
-    const savedTheme = localStorage.getItem("theme") as "light" | "dark" | null;
+    const savedTheme = localStorage.getItem("theme");
     const systemPrefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    
-    const initialTheme = savedTheme || (systemPrefersDark ? "dark" : "light");
-    setTheme(initialTheme);
-    
-    if (initialTheme === "dark") {
-      document.documentElement.classList.add("dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-    }
+
+    const initialTheme =
+      savedTheme === "dark" || savedTheme === "light"
+        ? savedTheme
+        : systemPrefersDark
+          ? "dark"
+          : "light";
+
+    applyTheme(initialTheme);
   }, []);
 
   const toggleTheme = () => {
-    const newTheme = theme === "light" ? "dark" : "light";
-    setTheme(newTheme);
-    localStorage.setItem("theme", newTheme);
-    if (newTheme === "dark") {
-      document.documentElement.classList.add("dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-    }
+    const isDark = document.documentElement.classList.contains("dark");
+    const nextTheme = isDark ? "light" : "dark";
+    localStorage.setItem("theme", nextTheme);
+    applyTheme(nextTheme);
   };
 
   return (
@@ -63,7 +57,8 @@ export function Navbar() {
 
         <div className="flex items-center gap-2 ml-auto sm:ml-0">
           <Button variant="ghost" size="icon" onClick={toggleTheme} className="rounded-full">
-            {theme === "light" ? <Moon className="size-4" /> : <Sun className="size-4" />}
+            <Moon className="size-4 dark:hidden" />
+            <Sun className="size-4 hidden dark:block" />
           </Button>
           <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest bg-muted px-2 py-1 rounded border whitespace-nowrap">
             Alpha v1.2.0
@@ -72,4 +67,8 @@ export function Navbar() {
       </div>
     </header>
   );
+}
+
+function applyTheme(theme: "light" | "dark") {
+  document.documentElement.classList.toggle("dark", theme === "dark");
 }

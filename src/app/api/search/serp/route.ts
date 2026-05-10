@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { logger } from "@/lib/logger";
+import { z } from "zod";
 
 const SERP_ENDPOINT = "https://serpapi.com/search";
 
@@ -11,13 +12,10 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { query, engine = "google" } = await req.json();
+    const body = SerpBodySchema.parse(await req.json());
+    const query = body.query;
+    const engine = body.engine;
     logger.info("POST /api/search/serp: Request received", { query, engine });
-
-    if (!query) {
-      logger.warn("POST /api/search/serp: Missing query");
-      return NextResponse.json({ error: "Query is required" }, { status: 400 });
-    }
 
     const url = new URL(SERP_ENDPOINT);
     url.searchParams.set("q", query);
@@ -26,25 +24,51 @@ export async function POST(req: NextRequest) {
 
     logger.info("POST /api/search/serp: Calling SerpApi", { engine, query });
     const response = await fetch(url.toString());
-    const data = await response.json();
+    const data = (await response.json().catch(() => ({}))) as unknown;
 
     if (!response.ok) {
-      logger.error("POST /api/search/serp: SerpApi error", { status: response.status, error: data.error });
-      return NextResponse.json({ error: data.error || "SerpApi error" }, { status: response.status });
+      const err = extractStringField(data, "error") ?? "SerpApi error";
+      logger.error("POST /api/search/serp: SerpApi error", { status: response.status, error: err });
+      return NextResponse.json({ error: err }, { status: response.status });
     }
 
     // Normalize results to match our UI expectations
-    const organicResults = data.organic_results || data.scholar_results || [];
-    const results = organicResults.map((res: any) => ({
-      name: res.title || res.name || "No Title",
-      url: res.link || res.url || "",
-      snippet: res.snippet || res.description || "",
-    }));
+    const organicResults =
+      extractArrayField(data, "organic_results") ??
+      extractArrayField(data, "scholar_results") ??
+      [];
+    const results = organicResults.map((res) => {
+      const r = res && typeof res === "object" ? (res as Record<string, unknown>) : {};
+      const name =
+        extractStringField(r, "title") ?? extractStringField(r, "name") ?? "No Title";
+      const url = extractStringField(r, "link") ?? extractStringField(r, "url") ?? "";
+      const snippet =
+        extractStringField(r, "snippet") ?? extractStringField(r, "description") ?? "";
+      return { name, url, snippet };
+    });
 
     logger.info("POST /api/search/serp: Results obtained", { count: results.length });
     return NextResponse.json({ results });
-  } catch (error: any) {
+  } catch (error: unknown) {
     logger.error("POST /api/search/serp: Unexpected error", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    const message = error instanceof Error ? error.message : "Unexpected error";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
+}
+
+const SerpBodySchema = z.object({
+  query: z.string().min(1, "Query is required"),
+  engine: z.string().default("google"),
+});
+
+function extractArrayField(payload: unknown, key: string): unknown[] | null {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as Record<string, unknown>;
+  return Array.isArray(record[key]) ? (record[key] as unknown[]) : null;
+}
+
+function extractStringField(payload: unknown, key: string): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as Record<string, unknown>;
+  return typeof record[key] === "string" ? (record[key] as string) : null;
 }

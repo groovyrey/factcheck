@@ -1,13 +1,12 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Sparkles, Loader2, MessageSquare, X, RotateCcw, Send } from "lucide-react";
+import { Sparkles, Loader2, MessageSquare, RotateCcw, Send } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 
 export default function TestPage() {
   const [chatMessages, setChatMessages] = useState<{ role: string; content: string }[]>([]);
@@ -50,9 +49,9 @@ export default function TestPage() {
       } else {
         setError(data.error || "Failed to get response from Cloudflare AI");
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      setError(err.message || "An unexpected error occurred");
+      setError(err instanceof Error ? err.message : "An unexpected error occurred");
     } finally {
       setChatLoading(false);
     }

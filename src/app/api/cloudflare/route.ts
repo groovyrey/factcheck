@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { logger } from "@/lib/logger";
 
 const CLOUDFLARE_ACCOUNT_ID = process.env.CFAI_ACCOUNT_ID;
-const MODEL = "@cf/moonshotai/kimi-k2.6";
+const MODEL = process.env.CFAI_MODEL ?? "@cf/moonshotai/kimi-k2.6";
 
 export async function POST(req: NextRequest) {
   const apiToken = process.env.CFAI_API_TOKEN;
@@ -39,7 +39,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: data.errors?.[0]?.message || "Cloudflare API error" }, { status: response.status });
     }
 
-    logger.info("POST /api/cloudflare: Cloudflare API response body", { data });
+    logger.info("POST /api/cloudflare: Cloudflare API response received", {
+      hasResult: Boolean(data?.result),
+      hasErrors: Boolean(data?.errors?.length),
+    });
 
     let text = "";
     if (data.result?.choices?.[0]?.message?.content) {
@@ -56,8 +59,9 @@ export async function POST(req: NextRequest) {
 
     logger.info("POST /api/cloudflare: Response completed", { textLength: text.length });
     return NextResponse.json({ text, model: MODEL });
-  } catch (error: any) {
+  } catch (error: unknown) {
     logger.error("POST /api/cloudflare: Unexpected error", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    const message = error instanceof Error ? error.message : "Unexpected error";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

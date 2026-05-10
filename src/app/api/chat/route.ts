@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { logger } from "@/lib/logger";
 import { rateLimit } from "@/lib/rate-limit";
+import { fetchUrlTextBestEffort } from "@/lib/url-fetch";
+import { z } from "zod";
+
+export const runtime = "nodejs";
 
 const modelsArray = [
   "inclusionai/ring-2.6-1t:free",
   "liquid/lfm-2.5-1.2b-thinking:free",
   "liquid/lfm-2.5-1.2b-instruct:free"
 ];
-const OPENROUTER_MODEL = modelsArray[0];
+const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL ?? modelsArray[0];
 const OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
 const SERP_ENDPOINT = "https://serpapi.com/search";
 
@@ -33,67 +37,43 @@ async function googleSearch(query: string) {
     url.searchParams.set("api_key", apiKey);
 
     const response = await fetch(url.toString());
-    const data = await response.json();
+    const data = (await response.json().catch(() => ({}))) as unknown;
 
     if (!response.ok) {
-      logger.error("googleSearch: SerpApi error", data.error || "SerpApi error");
-      return `Error performing search: ${data.error || "SerpApi error"}`;
+      const err = extractStringField(data, "error") ?? "SerpApi error";
+      logger.error("googleSearch: SerpApi error", err);
+      return `Error performing search: ${err}`;
     }
 
-    const results = (data.organic_results || []).slice(0, 5).map((res: any) => 
-      `Title: ${res.title}\nURL: ${res.link}\nSnippet: ${res.snippet}`
-    ).join("\n\n");
+    const organic = extractArrayField(data, "organic_results") ?? [];
+    const results = organic
+      .slice(0, 5)
+      .map((item) => {
+        const r = item && typeof item === "object" ? (item as Record<string, unknown>) : {};
+        const title = extractStringField(r, "title") ?? "No Title";
+        const link = extractStringField(r, "link") ?? "";
+        const snippet = extractStringField(r, "snippet") ?? "";
+        return `Title: ${title}\nURL: ${link}\nSnippet: ${snippet}`;
+      })
+      .join("\n\n");
 
-    logger.info("Google Search results obtained", { count: (data.organic_results || []).length });
+    logger.info("Google Search results obtained", { count: organic.length });
     return results || "No results found.";
-  } catch (error: any) {
+  } catch (error: unknown) {
     logger.error("googleSearch: Unexpected error", error);
-    return `Error performing search: ${error.message}`;
+    const message = error instanceof Error ? error.message : "Unexpected error";
+    return `Error performing search: ${message}`;
   }
 }
 
 async function fetchUrlContent(url: string) {
-  const fetchWithHeaders = async (targetUrl: string, useJina = false) => {
-    const finalUrl = useJina ? `https://r.jina.ai/${targetUrl}` : targetUrl;
-    const response = await fetch(finalUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Cache-Control": "no-cache",
-        "Upgrade-Insecure-Requests": "1"
-      }
-    });
-    return response;
-  };
-
   try {
-    logger.info("fetchUrlContent: Attempting direct fetch", { url });
-    let response = await fetchWithHeaders(url);
-    
-    // If forbidden or blocked, try via Jina Reader
-    if (response.status === 403 || response.status === 429 || response.status === 401) {
-      logger.warn(`fetchUrlContent: Direct fetch returned ${response.status}. Retrying via Jina...`, { url });
-      response = await fetchWithHeaders(url, true);
-    }
-
-    if (!response.ok) {
-      return `Error fetching URL: ${response.status} ${response.statusText}`;
-    }
-
-    const text = await response.text();
-    // Clean up content
-    const cleanedText = text
-      .replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gmi, "")
-      .replace(/<style\b[^>]*>([\s\S]*?)<\/style>/gmi, "")
-      .replace(/<[^>]+>/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-    
-    return cleanedText.slice(0, 20000); 
-  } catch (error: any) {
-    logger.error("fetchUrlContent: Unexpected error", { url, error: error.message });
-    return `Error fetching URL: ${error.message}`;
+    logger.info("fetchUrlContent: Fetch requested", { url });
+    return await fetchUrlTextBestEffort(url);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error("fetchUrlContent: Unexpected error", { url, message });
+    return `Error fetching URL: ${message}`;
   }
 }
 
@@ -142,10 +122,11 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { messages } = await req.json();
+    const body = OpenRouterBodySchema.parse(await req.json());
+    const messages = body.messages;
     logger.info("POST /api/chat: Request received", { messageCount: messages.length });
     
-    let currentMessages = [...messages];
+    const currentMessages = [...messages];
     let iterations = 0;
     const maxIterations = 5;
 
@@ -167,13 +148,14 @@ export async function POST(req: NextRequest) {
         }),
       });
 
-      const data = await response.json();
+      const data = (await response.json().catch(() => ({}))) as unknown;
       if (!response.ok) {
-        logger.error("POST /api/chat: OpenRouter API error", { status: response.status, error: data.error });
-        return NextResponse.json({ error: data.error?.message || "OpenRouter API error" }, { status: response.status });
+        const err = extractNestedMessage(data) ?? "OpenRouter API error";
+        logger.error("POST /api/chat: OpenRouter API error", { status: response.status, error: err });
+        return NextResponse.json({ error: err }, { status: response.status });
       }
 
-      const message = data.choices?.[0]?.message;
+      const message = extractChoiceMessage(data);
       if (!message) {
         logger.warn("POST /api/chat: OpenRouter returned no message");
         break;
@@ -181,20 +163,26 @@ export async function POST(req: NextRequest) {
 
       if (message.tool_calls && message.tool_calls.length > 0) {
         logger.info("POST /api/chat: OpenRouter requested tool calls", { count: message.tool_calls.length });
-        currentMessages.push(message);
+        currentMessages.push({
+          role: "assistant",
+          content: message.content ?? "",
+          tool_calls: message.tool_calls,
+        });
         
         for (const toolCall of message.tool_calls) {
-          if (toolCall.function.name === "fetch_url") {
-            const { url } = JSON.parse(toolCall.function.arguments);
-            const content = await fetchUrlContent(url);
+          const toolName = toolCall.function?.name;
+          const args = safeJsonParse(toolCall.function?.arguments);
+          if (toolName === "fetch_url") {
+            const url = typeof args?.url === "string" ? args.url : "";
+            const content = await fetchUrlContent(url || "");
             currentMessages.push({
               role: "tool",
               tool_call_id: toolCall.id,
               content: content,
             });
-          } else if (toolCall.function.name === "google_search") {
-            const { query } = JSON.parse(toolCall.function.arguments);
-            const content = await googleSearch(query);
+          } else if (toolName === "google_search") {
+            const q = typeof args?.query === "string" ? args.query : "";
+            const content = await googleSearch(q);
             currentMessages.push({
               role: "tool",
               tool_call_id: toolCall.id,
@@ -212,8 +200,92 @@ export async function POST(req: NextRequest) {
 
     logger.warn("POST /api/chat: Too many tool call iterations");
     return NextResponse.json({ error: "Too many tool call iterations" }, { status: 500 });
-  } catch (error: any) {
+  } catch (error: unknown) {
     logger.error("POST /api/chat: Unexpected error", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    const message = error instanceof Error ? error.message : "Unexpected error";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
+}
+
+const OpenRouterBodySchema = z.object({
+  messages: z.array(
+    z.object({
+      role: z.string(),
+      content: z.string().optional(),
+    }).passthrough(),
+  ),
+});
+
+function extractArrayField(payload: unknown, key: string): unknown[] | null {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as Record<string, unknown>;
+  return Array.isArray(record[key]) ? (record[key] as unknown[]) : null;
+}
+
+function extractStringField(payload: unknown, key: string): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as Record<string, unknown>;
+  return typeof record[key] === "string" ? (record[key] as string) : null;
+}
+
+function safeJsonParse(text: unknown): Record<string, unknown> | null {
+  if (typeof text !== "string") return null;
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function extractNestedMessage(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as Record<string, unknown>;
+  const err = record.error;
+  if (!err || typeof err !== "object") return null;
+  const errRec = err as Record<string, unknown>;
+  return typeof errRec.message === "string" ? errRec.message : null;
+}
+
+type OpenRouterToolCall = {
+  id: string;
+  function: { name: string; arguments: string };
+};
+
+type OpenRouterChoiceMessage = {
+  content?: string;
+  tool_calls?: OpenRouterToolCall[];
+};
+
+function extractChoiceMessage(payload: unknown): OpenRouterChoiceMessage | null {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as Record<string, unknown>;
+  const choices = record.choices;
+  if (!Array.isArray(choices) || choices.length === 0) return null;
+  const first = choices[0];
+  if (!first || typeof first !== "object") return null;
+  const msg = (first as Record<string, unknown>).message;
+  if (!msg || typeof msg !== "object") return null;
+
+  const m = msg as Record<string, unknown>;
+  const toolCallsRaw = m.tool_calls;
+  const tool_calls = Array.isArray(toolCallsRaw)
+    ? toolCallsRaw
+        .map((tc) => {
+          if (!tc || typeof tc !== "object") return null;
+          const tcr = tc as Record<string, unknown>;
+          const id = typeof tcr.id === "string" ? tcr.id : "";
+          const fn = tcr.function;
+          if (!fn || typeof fn !== "object") return null;
+          const fnr = fn as Record<string, unknown>;
+          const name = typeof fnr.name === "string" ? fnr.name : "";
+          const args = typeof fnr.arguments === "string" ? fnr.arguments : "{}";
+          if (!id || !name) return null;
+          return { id, function: { name, arguments: args } } satisfies OpenRouterToolCall;
+        })
+        .filter(Boolean)
+    : undefined;
+
+  const content = typeof m.content === "string" ? m.content : undefined;
+  return { content, tool_calls: tool_calls as OpenRouterToolCall[] | undefined };
 }
